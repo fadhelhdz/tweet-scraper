@@ -6,9 +6,11 @@ from configparser import ConfigParser
 from random import randint
 import asyncio
 import os
+import httpx
 
 START_DATE = datetime.strptime("2025-01-01", "%Y-%m-%d")
 NUM_DAYS = 2
+folder_path = os.path.join(os.getcwd(), "images")
 json_file = 'tweets.json'
 cookies_file = 'cookies.json'
 
@@ -47,6 +49,28 @@ async def load_existing_tweets():
             content = await file.read()
             return json.loads(content) if content.strip() else []
     return []
+
+async def download_media_with_retry(media, file_path, image_paths, retries=3):
+    """Download media with retries. On failure, append 'failed to download' and continue."""
+    for attempt in range(1, retries + 1):
+        try:
+            print(f"Download Attempt {attempt}: Downloading {media.media_url}")
+            await media.download(file_path)  # Keep existing media.download
+            image_paths.append(file_path)     # Append path on success
+            print(f"Downloaded to {file_path}")
+            return True  # Successful download
+        except httpx.ConnectTimeout:
+            print(f"Timeout: Attempt {attempt}/{retries} failed.")
+            if attempt < retries:
+                await asyncio.sleep(5)  # Wait before retrying
+        except Exception as e:
+            print(f"Error: {e}")
+            break
+
+    # After all retries fail
+    print(f"Failed after {retries} retries for {media.media_url}")
+    image_paths.append("failed to download")  # Record failure
+    return False  #Indicate failure
 
 async def main():
     # Load credentials
@@ -95,6 +119,16 @@ async def main():
             for tweet in tweets:
                 if tweet.lang in ['in', 'en']:
                     tweet_count += 1
+                    image_paths = []
+
+                    # Download and save images
+                    if hasattr(tweet, 'media') and tweet.media:
+                        for i, media in enumerate(tweet.media):
+                            file_path = os.path.join(folder_path, f'media_{tweet_count}_{i}.jpg')
+                            success = await download_media_with_retry(media, file_path, image_paths)
+                            if not success:
+                                print(f"⚠️ Skipping media for tweet {tweet_count} due to failed downloads.")
+                                break  # 🚀 Move to the next tweet after failure
 
                     tweet_data = {
                         "tweet_count": tweet_count,
@@ -105,7 +139,8 @@ async def main():
                         "created_at": tweet.created_at_datetime.strftime('%Y-%m-%d %H:%M:%S') if tweet.created_at_datetime else None,
                         "retweet_count": tweet.retweet_count or 0,
                         "favorite_count": tweet.favorite_count or 0,
-                        "reply_count": tweet.reply_count or 0
+                        "reply_count": tweet.reply_count or 0,
+                        "image_paths": image_paths
                     }
 
                     daily_tweets.append(tweet_data)
