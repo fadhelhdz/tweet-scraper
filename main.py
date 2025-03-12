@@ -1,12 +1,12 @@
 from twikit import Client, TooManyRequests
-import time
 from datetime import datetime, timedelta
-import csv
 from configparser import ConfigParser
 from random import randint
-import asyncio
+import aiofiles
+import json
 import os
 import httpx
+import asyncio
 
 START_DATE = datetime.strptime("2025-01-01", "%Y-%m-%d")
 NUM_DAYS = 2
@@ -22,7 +22,7 @@ async def get_tweets(client, query, tweets):
     else:
         wait_time = randint(5, 10)
         print(f'{datetime.now()} - Getting next tweets after {wait_time} seconds ...')
-        time.sleep(wait_time)
+        await asyncio.sleep(wait_time)
         tweets = await tweets.next()
     return tweets
 
@@ -88,6 +88,7 @@ async def main():
     client = Client(language='en-US')
     await login_or_load_cookies(client, username, email, password)
 
+    all_tweets = await load_existing_tweets()
     tweet_count = 0
 
     for day_offset in range(NUM_DAYS):
