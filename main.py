@@ -34,6 +34,19 @@ async def login_or_load_cookies(client, username, email, password):
         client.save_cookies(cookies_file)
         print(f"{datetime.now()} - Cookies saved to {cookies_file}")
 
+async def save_tweets_to_json(tweets_list):
+    """Save the updated tweets list back to the JSON file."""
+    async with aiofiles.open(json_file, mode='w', encoding='utf-8') as file:
+        await file.write(json.dumps(tweets_list, ensure_ascii=False, indent=4))
+
+async def load_existing_tweets():
+    """Load existing tweets if the JSON file exists; else return an empty list."""
+    if os.path.exists(json_file):
+        async with aiofiles.open(json_file, mode='r', encoding='utf-8') as file:
+            content = await file.read()
+            return json.loads(content) if content.strip() else []
+    return []
+
 async def main():
     # Load credentials
     config = ConfigParser()
@@ -58,6 +71,7 @@ async def main():
         query = f'100 hari "Prabowo" since:{since_date} until:{until_date}'
         
         tweets = None
+        daily_tweets = []
 
         while True:
             try:
@@ -65,25 +79,41 @@ async def main():
             except TooManyRequests as e:
                 rate_limit_reset = datetime.fromtimestamp(e.rate_limit_reset)
                 print(f'{datetime.now()} - Rate limit reached. Waiting until {rate_limit_reset}')
-                wait_time = rate_limit_reset - datetime.now()
-                time.sleep(wait_time.total_seconds())
+                wait_time = (rate_limit_reset - datetime.now()).total_seconds()
+                await asyncio.sleep(wait_time)
                 continue
 
             if not tweets:
-                print(f'{datetime.now()} - No more tweets found')
+                if daily_tweets:
+                    all_tweets.extend(daily_tweets)
+                    await save_tweets_to_json(all_tweets)
+                    print(f'{datetime.now()} - Saved {len(daily_tweets)} tweets for {since_date}. Total: {len(all_tweets)}')
+                print(f'{datetime.now()} - No more tweets found for {since_date}. Moving to next day.')
                 break
 
             for tweet in tweets:
-                tweet_count += 1
-                tweet_data = [tweet_count, tweet.user.name, tweet.text, tweet.created_at, tweet.retweet_count, tweet.favorite_count]
-                
-                with open('tweets.csv', 'a', newline='', encoding='utf-8') as file:
-                    writer = csv.writer(file)
-                    writer.writerow(tweet_data)
+                if tweet.lang in ['in', 'en']:
+                    tweet_count += 1
 
-            print(f'{datetime.now()} - Got {tweet_count} tweets')
+                    tweet_data = {
+                        "tweet_count": tweet_count,
+                        "unique_id": tweet.user.screen_name,
+                        "username": tweet.user.name,
+                        "text": tweet.full_text or tweet.text,
+                        "hashtags": tweet.hashtags if tweet.hashtags else [],
+                        "created_at": tweet.created_at_datetime.strftime('%Y-%m-%d %H:%M:%S') if tweet.created_at_datetime else None,
+                        "retweet_count": tweet.retweet_count or 0,
+                        "favorite_count": tweet.favorite_count or 0,
+                        "reply_count": tweet.reply_count or 0
+                    }
 
-        print(f'{datetime.now()} - Done! Got {tweet_count} tweets found')
+                    daily_tweets.append(tweet_data)
+                else:
+                    continue
+
+            print(f'{datetime.now()} - Collected {len(daily_tweets)} tweets for {since_date}.')
+
+    print(f'{datetime.now()} - Done! Total tweets collected: {tweet_count}')
 
 if __name__ == "__main__":
     asyncio.run(main())
