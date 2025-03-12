@@ -9,6 +9,7 @@ import os
 
 START_DATE = datetime.strptime("2025-01-01", "%Y-%m-%d")
 NUM_DAYS = 2
+json_file = 'tweets.json'
 cookies_file = 'cookies.json'
 
 async def get_tweets(client, query, tweets):
